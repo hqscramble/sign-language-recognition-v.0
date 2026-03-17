@@ -1,0 +1,208 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>手语识别 - 机器学习可训练版 (带本地存储)</title>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/knn-classifier"></script>
+
+    <style>
+        body { 
+            display: flex; flex-direction: column; align-items: center; 
+            font-family: 'Segoe UI', Tahoma, sans-serif; background-color: #f5f6fa; margin: 0; padding: 20px;
+        }
+        .container { 
+            position: relative; margin-top: 10px; box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+            border-radius: 8px; overflow: hidden; background-color: #000;
+        }
+        video { display: none; }
+        canvas { display: block; }
+        
+        .panel {
+            margin-top: 20px; padding: 20px; background-color: #fff;
+            border-radius: 8px; box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+            text-align: center; width: 600px;
+        }
+        
+        .control-row { display: flex; gap: 10px; justify-content: center; align-items: center; margin-bottom: 10px; }
+        input[type="text"] { padding: 10px; font-size: 16px; border: 1px solid #bdc3c7; border-radius: 4px; flex: 1; }
+        
+        button {
+            padding: 10px 15px; font-size: 14px; cursor: pointer; border: none; border-radius: 4px;
+            background-color: #3498db; color: white; font-weight: bold; transition: background-color 0.2s;
+        }
+        button:hover { background-color: #2980b9; }
+        button:active { background-color: #e74c3c; } 
+        
+        .btn-green { background-color: #27ae60; }
+        .btn-green:hover { background-color: #2ecc71; }
+        .btn-gray { background-color: #95a5a6; }
+        .btn-gray:hover { background-color: #7f8c8d; }
+
+        #output-text { font-size: 28px; font-weight: bold; color: #2c3e50; margin: 0; }
+        #debug-text { font-size: 14px; color: #7f8c8d; margin-top: 10px; }
+    </style>
+</head>
+<body>
+
+    <h2>手势学习与识别 (带记忆功能)</h2>
+    
+    <div class="panel">
+        <div class="control-row">
+            <input type="text" id="gesture-name" placeholder="输入手势名称 (如: 点赞)">
+            <button id="train-btn">按住录入</button>
+        </div>
+        <div class="control-row">
+            <button class="btn-green" id="save-btn">💾 保存模型到本地</button>
+            <button class="btn-green" id="load-btn">📂 从本地加载模型</button>
+            <button class="btn-gray" id="clear-btn">清空记忆</button>
+        </div>
+    </div>
+
+    <div class="container">
+        <video class="input_video"></video>
+        <canvas class="output_canvas" width="640" height="480"></canvas>
+    </div>
+    
+    <div class="panel">
+        <p id="output-text">正在启动摄像头...</p>
+        <p id="debug-text">模型状态: 未录入任何手势</p>
+    </div>
+
+    <script>
+        const videoElement = document.querySelector('.input_video');
+        const canvasElement = document.querySelector('.output_canvas');
+        const canvasCtx = canvasElement.getContext('2d');
+        const outputText = document.getElementById('output-text');
+        const debugText = document.getElementById('debug-text');
+        
+        const trainBtn = document.getElementById('train-btn');
+        const saveBtn = document.getElementById('save-btn');
+        const loadBtn = document.getElementById('load-btn');
+        const clearBtn = document.getElementById('clear-btn');
+        const gestureNameInput = document.getElementById('gesture-name');
+
+        let classifier = knnClassifier.create();
+        let isTraining = false;
+
+        // 录入事件绑定
+        trainBtn.addEventListener('mousedown', () => isTraining = true);
+        trainBtn.addEventListener('mouseup', () => isTraining = false);
+        trainBtn.addEventListener('mouseleave', () => isTraining = false);
+        trainBtn.addEventListener('touchstart', (e) => { e.preventDefault(); isTraining = true; });
+        trainBtn.addEventListener('touchend', () => isTraining = false);
+
+        // --- 新增：保存模型到 LocalStorage ---
+        saveBtn.addEventListener('click', () => {
+            if (classifier.getNumClasses() === 0) {
+                alert("模型是空的，请先录入一些手势再保存！");
+                return;
+            }
+            // 获取分类器内部的张量数据集
+            let dataset = classifier.getClassifierDataset();
+            let datasetObj = {};
+            // 将张量 (Tensor) 转换为普通数组，以便 JSON 序列化
+            Object.keys(dataset).forEach((key) => {
+                datasetObj[key] = dataset[key].arraySync();
+            });
+            // 存入浏览器缓存
+            localStorage.setItem('myGestureModel', JSON.stringify(datasetObj));
+            alert("模型已成功保存到浏览器本地缓存！下次刷新网页可以直接加载。");
+        });
+
+        // --- 新增：从 LocalStorage 加载模型 ---
+        loadBtn.addEventListener('click', () => {
+            let modelStr = localStorage.getItem('myGestureModel');
+            if (modelStr) {
+                let datasetObj = JSON.parse(modelStr);
+                let dataset = {};
+                // 将普通数组转换回 TensorFlow 的二维张量 (Tensor2D)
+                Object.keys(datasetObj).forEach((key) => {
+                    dataset[key] = tf.tensor2d(datasetObj[key]);
+                });
+                classifier.setClassifierDataset(dataset);
+                debugText.innerText = `模型状态: 已加载 ${classifier.getNumClasses()} 种手势`;
+                outputText.innerText = "模型加载成功，请做出手势";
+                alert("模型加载成功！");
+            } else {
+                alert("本地没有找到保存的模型，请先录入并保存。");
+            }
+        });
+
+        // 清空分类器
+        clearBtn.addEventListener('click', () => {
+            classifier.clearAllClasses();
+            debugText.innerText = "模型状态: 已清空";
+            outputText.innerText = "请录入新手势";
+        });
+
+        // 获取归一化特征
+        function getNormalizedFeatures(landmarks) {
+            const wrist = landmarks[0];
+            const features = [];
+            for (let i = 0; i < landmarks.length; i++) {
+                features.push(landmarks[i].x - wrist.x);
+                features.push(landmarks[i].y - wrist.y);
+                features.push(landmarks[i].z - wrist.z);
+            }
+            return features;
+        }
+
+        // 识别核心逻辑
+        async function onResults(results) {
+            canvasCtx.save();
+            canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
+            canvasCtx.drawImage(results.image, 0, 0, canvasElement.width, canvasElement.height);
+
+            if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
+                const landmarks = results.multiHandLandmarks[0];
+                drawConnectors(canvasCtx, landmarks, HAND_CONNECTIONS, {color: '#00FF00', lineWidth: 4});
+                drawLandmarks(canvasCtx, landmarks, {color: '#FF0000', lineWidth: 2, radius: 3});
+
+                const features = getNormalizedFeatures(landmarks);
+                const tensor = tf.tensor1d(features);
+
+                if (isTraining) {
+                    const label = gestureNameInput.value.trim() || "未命名";
+                    classifier.addExample(tensor, label);
+                    outputText.innerText = `录入中: [ ${label} ] ...`;
+                    debugText.innerText = `已学习 ${classifier.getNumClasses()} 种手势`;
+                } else if (classifier.getNumClasses() > 0) {
+                    try {
+                        const res = await classifier.predictClass(tensor, 3);
+                        if (res.confidences[res.label] > 0.6) {
+                            outputText.innerText = `识别结果: ${res.label}`;
+                            outputText.style.color = "#27ae60";
+                        } else {
+                            outputText.innerText = "匹配度过低...";
+                            outputText.style.color = "#f39c12";
+                        }
+                    } catch (e) { console.error(e); }
+                } else {
+                    outputText.innerText = "等待录入手势或加载模型";
+                    outputText.style.color = "#2c3e50";
+                }
+                tensor.dispose(); // 防止内存泄漏
+            }
+            canvasCtx.restore();
+        }
+
+        const hands = new Hands({locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`});
+        hands.setOptions({ maxNumHands: 1, modelComplexity: 1, minDetectionConfidence: 0.6, minTrackingConfidence: 0.6 });
+        hands.onResults(onResults);
+
+        const camera = new Camera(videoElement, {
+            onFrame: async () => { await hands.send({image: videoElement}); },
+            width: 640, height: 480
+        });
+        
+        camera.start()
+            .then(() => { outputText.innerText = "系统就绪"; })
+            .catch((err) => { outputText.innerText = "摄像头启动失败"; console.error(err); });
+    </script>
+</body>
+</html>
