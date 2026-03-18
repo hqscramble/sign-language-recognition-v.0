@@ -293,7 +293,7 @@
     });
 
     // ==========================================
-    // 面部表情识别系统 (原封不动)
+    // 面部表情识别系统
     // ==========================================
     const FACE = {
         mouthLeft: 61, mouthRight: 291, lipTop: 13, lipBottom: 14,
@@ -397,28 +397,31 @@
             faceDebug.innerText = `EAR:${avgEAR.toFixed(3)} MAR:${mar.toFixed(3)} smile:${smileDelta.toFixed(4)} browAsym:${browAsym.toFixed(3)} browRatio:${browInnerRatio.toFixed(3)} browEye:${avgBrowEyeRatio.toFixed(3)} mouthAsym:${mouthAsym.toFixed(3)}`;
         }
 
+        // 🌟 1. 惊讶: 剥夺 EAR 的绝对判断权，只要挑眉或张大嘴巴就算惊讶
         {
-            const bigEye = avgEAR > 0.495; 
-            const browUp = avgBrowEyeRatio > 1.15; 
+            const browUp = avgBrowEyeRatio > 1.20; 
             const marOpen = mar > 0.35;
-            if (bigEye || browUp) detected = '惊讶';
-            if (!detected && avgEAR > 0.45 && avgBrowEyeRatio > 1.10 && marOpen) detected = '惊讶'; 
+            if (browUp || marOpen) detected = '惊讶';
         }
 
+        // 2. 生气/愤怒
         if (!detected && mouthAsym > 0.08 && smileDelta < 0.005) {
             detected = '生气';
         }
 
+        // 3. 困惑
         if (!detected && smileDelta < 0.002 && avgBrowEyeRatio < 0.86) {
             detected = '困惑';
         }
 
+        // 4. 高兴
         if (!detected && smileDelta > 0.006) {
             detected = '高兴';
         }
 
+        // 🌟 5. 平静: 彻底放开 EAR 的上限，无限包容眼镜导致的眼部数据放大！
         if (!detected) {
-            const isCalm = Math.abs(smileDelta) < 0.012 && avgEAR >= 0.35 && avgEAR <= 0.495 && mar < 0.15;
+            const isCalm = Math.abs(smileDelta) < 0.020 && avgEAR >= 0.30 && avgEAR <= 0.75 && mar < 0.15 && avgBrowEyeRatio <= 1.20;
             if (isCalm) {
                 neutralFrameCount++;
                 if (neutralFrameCount >= NEUTRAL_DEBOUNCE) {
@@ -572,6 +575,7 @@
         }
         canvasCtx.restore();
 
+        // 刷新表情
         if (results.faceLandmarks) {
             const fl = results.faceLandmarks;
             const expr = classifyExpression(fl);
@@ -587,6 +591,7 @@
             }
         } else { expressionText.innerText = '未检测到面部'; expressionText.style.color = '#95a5a6'; }
 
+        // 手部识别与录入
         const hasHand = results.leftHandLandmarks || results.rightHandLandmarks;
 
         if (isRecording) {
