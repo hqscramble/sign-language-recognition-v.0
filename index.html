@@ -1,0 +1,849 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>手语识别 - 终极控制台布局版</title>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/holistic/holistic.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/knn-classifier"></script>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, Roboto, sans-serif; 
+            background-color: #f0f2f5; 
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden; 
+        }
+        
+        /* 顶部标题栏 */
+        .header {
+            background-color: #2c3e50;
+            color: #fff;
+            padding: 12px 20px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            z-index: 10;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .header h2 { font-size: 18px; margin: 0; font-weight: 600; }
+        .header-status { font-size: 12px; color: #8ACBB7; }
+
+        /* 核心内容区：左右布局 */
+        .main-layout {
+            display: flex;
+            flex: 1;
+            padding: 15px;
+            gap: 15px;
+            overflow: hidden;
+        }
+
+        /* 左侧：3/4 纯视频区，极致沉浸 */
+        .left-area {
+            flex: 3; 
+            background-color: #000;
+            border-radius: 12px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+            overflow: hidden;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            position: relative;
+        }
+        video { display: none; }
+        .left-area canvas { 
+            width: 100%; 
+            height: 100%; 
+            object-fit: contain; 
+            transform: scaleX(-1); 
+        }
+
+        /* 右侧：1/4 操作面板区 */
+        .right-area {
+            flex: 1; 
+            min-width: 320px;
+            max-width: 400px;
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+        }
+
+        /* 右侧上部分：识别结果面板 (固定不滚动) */
+        .result-panel {
+            background: #fff;
+            border-radius: 12px;
+            padding: 20px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.05);
+            text-align: center;
+            flex-shrink: 0;
+            min-height: 130px;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+        }
+        #output-text { font-size: 24px; font-weight: bold; color: #2c3e50; transition: color 0.3s; margin-bottom: 5px; }
+        #expression-text { font-size: 16px; color: #8e44ad; }
+        #face-debug { 
+            font-size: 11px; 
+            color: #95a5a6; 
+            margin-top: 10px; 
+            font-family: monospace; 
+            line-height: 1.4;
+            word-wrap: break-word; 
+        }
+
+        /* 右侧下部分：工具与模型管理面板 (可独立滚动) */
+        .controls-panel {
+            background: #fff;
+            border-radius: 12px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.05);
+            overflow-y: auto;
+            flex: 1;
+        }
+
+        .control-section {
+            padding: 20px;
+            border-bottom: 1px solid #eee;
+        }
+        .control-section:last-child { border-bottom: none; }
+        
+        .section-title { font-size: 14px; font-weight: bold; color: #34495e; margin-bottom: 12px; display: flex; align-items: center; gap: 6px; }
+        .section-title::before { content: ''; display: block; width: 4px; height: 14px; background: #8ACBB7; border-radius: 2px; }
+
+        .input-group { margin-bottom: 10px; }
+        .input-group input { 
+            width: 100%; padding: 10px 12px; font-size: 14px; 
+            border: 1px solid #ddd; border-radius: 6px; 
+            background: #f8f9fa; transition: border 0.2s;
+        }
+        .input-group input:focus { outline: none; border-color: #8ACBB7; background: #fff; }
+
+        .btn {
+            width: 100%; padding: 10px; font-size: 14px; font-weight: bold;
+            border: none; border-radius: 6px; cursor: pointer;
+            transition: all 0.2s; display: flex; align-items: center; justify-content: center; gap: 5px;
+        }
+        .btn-primary { background-color: #e74c3c; color: #fff; }
+        .btn-primary:hover { background-color: #c0392b; }
+        .btn-primary.recording { animation: pulse 1s infinite; }
+        .btn-success { background-color: #8ACBB7; color: #000; }
+        .btn-success:hover { background-color: #7ab3a1; }
+        .btn-purple { background-color: #8e44ad; color: #fff; }
+        .btn-purple:hover { background-color: #9b59b6; }
+        .btn-outline { background-color: transparent; border: 1px solid #bdc3c7; color: #7f8c8d; }
+        .btn-outline:hover { background-color: #f1f2f6; color: #2c3e50; }
+
+        .status-text { font-size: 12px; color: #95a5a6; margin-top: 6px; text-align: center; }
+        .row-buttons { display: flex; gap: 10px; margin-top: 10px; }
+        .row-buttons .btn { flex: 1; }
+
+        #record-progress { height: 4px; background: #eee; border-radius: 2px; margin-top: 10px; overflow: hidden; display: none; }
+        #record-bar { height: 100%; width: 0%; background: #e74c3c; transition: width 0.1s; }
+
+        @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.6; } }
+    </style>
+</head>
+<body>
+
+    <div class="header">
+        <h2>听障沟通原型系统</h2>
+        <div class="header-status" id="debug-text">模型状态: 系统初始化中...</div>
+    </div>
+
+    <div class="main-layout">
+        <div class="left-area">
+            <video class="input_video" playsinline webkit-playsinline muted autoplay></video>
+            <canvas class="output_canvas"></canvas>
+        </div>
+
+        <div class="right-area">
+            
+            <div class="result-panel">
+                <p id="output-text">正在启动摄像头...</p>
+                <p id="expression-text"></p>
+                <p id="face-debug"></p>
+            </div>
+            
+            <div class="controls-panel">
+                
+                <div class="control-section">
+                    <div class="section-title">1. 录入原子动作</div>
+                    <div class="input-group">
+                        <input type="text" id="gesture-name" autocomplete="off" placeholder="输入动作名称 (如: 新、年)">
+                    </div>
+                    <button class="btn btn-primary" id="record-btn">开始录入</button>
+                    <div id="record-progress"><div id="record-bar"></div></div>
+                </div>
+
+                <div class="control-section">
+                    <div class="section-title">2. 长句拼接规则</div>
+                    <div class="input-group">
+                        <input type="text" id="dict-keys" autocomplete="off" placeholder="动作序列 (如: 没有,面包)">
+                    </div>
+                    <div class="input-group">
+                        <input type="text" id="dict-value" autocomplete="off" placeholder="显示长句 (如: 🍞 没面包了)">
+                    </div>
+                    <button class="btn btn-purple" id="add-dict-btn">添加规则</button>
+                    <div class="status-text" id="dict-status">当前自定义规则数: 0</div>
+                </div>
+
+                <div class="control-section">
+                    <div class="section-title">3. GitHub 云同步</div>
+                    <div class="input-group">
+                        <input type="text" id="gh-token" autocomplete="off" placeholder="GitHub Token">
+                    </div>
+                    <div class="input-group">
+                        <input type="text" id="gh-repo" autocomplete="off" placeholder="用户名/仓库名">
+                    </div>
+                    <div class="row-buttons">
+                        <button class="btn btn-outline" id="gh-clear-btn">清除配置</button>
+                        <button class="btn btn-success" id="gh-save-btn" style="color: #fff; background-color: #34495e;">保存</button>
+                    </div>
+                    <div class="status-text" id="gh-status">未配置GitHub</div>
+                </div>
+
+                <div class="control-section">
+                    <div class="section-title">4. 模型管理</div>
+                    <button class="btn btn-success" id="sync-btn" style="margin-bottom: 10px;">上传同步到 GitHub</button>
+                    <button class="btn btn-outline" id="pull-btn" style="margin-bottom: 10px;">从 GitHub 拉取模型</button>
+                    <button class="btn btn-outline" id="clear-btn" style="color: #e74c3c; border-color: #e74c3c;">清空本地模型与句库</button>
+                </div>
+
+            </div>
+        </div>
+    </div>
+
+    <script>
+    // ==========================================
+    // UI 元素绑定
+    // ==========================================
+    const videoElement = document.querySelector('.input_video');
+    const canvasElement = document.querySelector('.output_canvas');
+    const canvasCtx = canvasElement.getContext('2d');
+    const outputText = document.getElementById('output-text');
+    const expressionText = document.getElementById('expression-text');
+    const debugText = document.getElementById('debug-text');
+    const recordBtn = document.getElementById('record-btn');
+    const gestureNameInput = document.getElementById('gesture-name');
+    const recordProgress = document.getElementById('record-progress');
+    const recordBar = document.getElementById('record-bar');
+
+    let classifier = knnClassifier.create();
+    let isRecording = false;
+    let recordFramesCount = 0;
+    const MAX_RECORD_FRAMES = 50; 
+
+    let actionSequence = [];      
+    let lastActionTime = 0;       
+    let currentConfirmed = "";    
+    let actionDebounceCount = 0;  
+
+    // ==========================================
+    // 动态组合句库管理
+    // ==========================================
+    let customDictionary = {}; 
+    const baseDictionary = {
+        "新,年": "新年",
+        "新,年,快乐": "🎉 新年快乐！",
+        "赞,弯,赞,弯": "🙏 谢谢！",
+        "赞,弯": "🙏 谢谢！",
+        "赞": "👍 太棒了！"
+    };
+    let gestureDictionary = { ...baseDictionary };
+
+    const dictStatus = document.getElementById('dict-status');
+    
+    function updateDictUI() {
+        if(dictStatus) dictStatus.innerText = `当前自定义规则数: ${Object.keys(customDictionary).length}`;
+    }
+
+    function loadLocalDict() {
+        try {
+            const savedDict = localStorage.getItem('custom_dict');
+            if (savedDict) {
+                customDictionary = JSON.parse(savedDict);
+                gestureDictionary = { ...baseDictionary, ...customDictionary };
+            }
+        } catch(e) {}
+        updateDictUI();
+    }
+    loadLocalDict();
+
+    document.getElementById('add-dict-btn').addEventListener('click', () => {
+        const keys = document.getElementById('dict-keys').value.trim().replace(/，/g, ','); 
+        const val = document.getElementById('dict-value').value.trim();
+        if (!keys || !val) { alert('请填写动作序列和显示长句！'); return; }
+        
+        customDictionary[keys] = val;
+        gestureDictionary = { ...baseDictionary, ...customDictionary }; 
+        
+        localStorage.setItem('custom_dict', JSON.stringify(customDictionary));
+        updateDictUI();
+        
+        document.getElementById('dict-keys').value = '';
+        document.getElementById('dict-value').value = '';
+        alert('✅ 规则添加成功！在摄像头前打出该序列即可识别。');
+        
+        if (getGHConfig()) { uploadToGitHub(); }
+    });
+
+    // ==========================================
+    // 面部表情识别系统 (原封不动)
+    // ==========================================
+    const FACE = {
+        mouthLeft: 61, mouthRight: 291, lipTop: 13, lipBottom: 14,
+        leftEyeTop: 159, leftEyeBottom: 145, leftEyeOuter: 33, leftEyeInner: 133,
+        rightEyeTop: 386, rightEyeBottom: 374, rightEyeInner: 362, rightEyeOuter: 263,
+        leftBrowInner: 55, rightBrowInner: 285, leftBrowPeak: 105, rightBrowPeak: 334
+    };
+
+    function dist(a, b) {
+        return Math.sqrt((a.x - b.x) ** 2 + (a.y - b.y) ** 2);
+    }
+
+    function calcMAR(fl) {
+        return dist(fl[FACE.lipTop], fl[FACE.lipBottom]) / (dist(fl[FACE.mouthLeft], fl[FACE.mouthRight]) || 0.001);
+    }
+
+    function calcLeftEAR(fl) {
+        return dist(fl[FACE.leftEyeTop], fl[FACE.leftEyeBottom]) / (dist(fl[FACE.leftEyeOuter], fl[FACE.leftEyeInner]) || 0.001);
+    }
+    function calcRightEAR(fl) {
+        return dist(fl[FACE.rightEyeTop], fl[FACE.rightEyeBottom]) / (dist(fl[FACE.rightEyeInner], fl[FACE.rightEyeOuter]) || 0.001);
+    }
+
+    function calcMouthWidth(fl) { return dist(fl[FACE.mouthLeft], fl[FACE.mouthRight]); }
+
+    function calcSmileValue(fl) {
+        const avgCornerY = (fl[FACE.mouthLeft].y + fl[FACE.mouthRight].y) / 2;
+        return fl[FACE.lipTop].y - avgCornerY; 
+    }
+
+    function calcBrowEyeDist(fl, browIdx, eyeTopIdx, eyeBottomIdx) {
+        const eyeCenterY = (fl[eyeTopIdx].y + fl[eyeBottomIdx].y) / 2;
+        return eyeCenterY - fl[browIdx].y; 
+    }
+
+    function calcBrowInnerDist(fl) { return dist(fl[FACE.leftBrowInner], fl[FACE.rightBrowInner]); }
+
+    function calcMouthAsymmetry(fl) {
+        const leftY = fl[FACE.mouthLeft].y;
+        const rightY = fl[FACE.mouthRight].y;
+        const width = dist(fl[FACE.mouthLeft], fl[FACE.mouthRight]);
+        return width > 0 ? Math.abs(leftY - rightY) / width : 0;
+    }
+
+    function calcBrowAsymmetry(fl) {
+        const leftH = calcBrowEyeDist(fl, FACE.leftBrowPeak, FACE.leftEyeTop, FACE.leftEyeBottom);
+        const rightH = calcBrowEyeDist(fl, FACE.rightBrowPeak, FACE.rightEyeTop, FACE.rightEyeBottom);
+        const avg = (leftH + rightH) / 2;
+        return avg > 0 ? Math.abs(leftH - rightH) / avg : 0;
+    }
+
+    let baseline = { mouthWidth: 0, browInnerDist: 0, browEyeDistL: 0, browEyeDistR: 0, smileValue: 0, calibrated: false, samples: [] };
+    const CALIBRATION_FRAMES = 10;
+
+    function updateBaseline(fl) {
+        if (baseline.calibrated) return;
+        baseline.samples.push({
+            mouthWidth: calcMouthWidth(fl),
+            browInnerDist: calcBrowInnerDist(fl),
+            browEyeDistL: calcBrowEyeDist(fl, FACE.leftBrowPeak, FACE.leftEyeTop, FACE.leftEyeBottom),
+            browEyeDistR: calcBrowEyeDist(fl, FACE.rightBrowPeak, FACE.rightEyeTop, FACE.rightEyeBottom),
+            smileValue: calcSmileValue(fl)
+        });
+        if (baseline.samples.length >= CALIBRATION_FRAMES) {
+            const avg = (arr, key) => arr.reduce((s, v) => s + v[key], 0) / arr.length;
+            baseline.mouthWidth = avg(baseline.samples, 'mouthWidth');
+            baseline.browInnerDist = avg(baseline.samples, 'browInnerDist');
+            baseline.browEyeDistL = avg(baseline.samples, 'browEyeDistL');
+            baseline.browEyeDistR = avg(baseline.samples, 'browEyeDistR');
+            baseline.smileValue = avg(baseline.samples, 'smileValue');
+            baseline.calibrated = true;
+            baseline.samples = [];
+        }
+    }
+
+    let neutralFrameCount = 0;
+    const NEUTRAL_DEBOUNCE = 5; 
+    let lastExpression = '校准中...';
+
+    function classifyExpression(fl) {
+        const mar = calcMAR(fl);
+        const leftEAR = calcLeftEAR(fl);
+        const rightEAR = calcRightEAR(fl);
+        const avgEAR = (leftEAR + rightEAR) / 2;
+
+        updateBaseline(fl);
+        if (!baseline.calibrated) return '校准中... (' + baseline.samples.length + '/' + CALIBRATION_FRAMES + ')';
+
+        const browInnerRatio = calcBrowInnerDist(fl) / baseline.browInnerDist;
+        const browAsym = calcBrowAsymmetry(fl);
+        const browEyeDistL = calcBrowEyeDist(fl, FACE.leftBrowPeak, FACE.leftEyeTop, FACE.leftEyeBottom);
+        const browEyeDistR = calcBrowEyeDist(fl, FACE.rightBrowPeak, FACE.rightEyeTop, FACE.rightEyeBottom);
+        const avgBrowEyeRatio = ((browEyeDistL / baseline.browEyeDistL) + (browEyeDistR / baseline.browEyeDistR)) / 2;
+        const smileDelta = calcSmileValue(fl) - baseline.smileValue; 
+
+        let detected = null;
+        const mouthAsym = calcMouthAsymmetry(fl);
+
+        const faceDebug = document.getElementById('face-debug');
+        if (faceDebug) {
+            faceDebug.innerText = `EAR:${avgEAR.toFixed(3)} MAR:${mar.toFixed(3)} smile:${smileDelta.toFixed(4)} browAsym:${browAsym.toFixed(3)} browRatio:${browInnerRatio.toFixed(3)} browEye:${avgBrowEyeRatio.toFixed(3)} mouthAsym:${mouthAsym.toFixed(3)}`;
+        }
+
+        {
+            const bigEye = avgEAR > 0.495; 
+            const browUp = avgBrowEyeRatio > 1.15; 
+            const marOpen = mar > 0.35;
+            if (bigEye || browUp) detected = '惊讶';
+            if (!detected && avgEAR > 0.45 && avgBrowEyeRatio > 1.10 && marOpen) detected = '惊讶'; 
+        }
+
+        if (!detected && mouthAsym > 0.08 && smileDelta < 0.005) {
+            detected = '生气';
+        }
+
+        if (!detected && smileDelta < 0.002 && avgBrowEyeRatio < 0.86) {
+            detected = '困惑';
+        }
+
+        if (!detected && smileDelta > 0.006) {
+            detected = '高兴';
+        }
+
+        if (!detected) {
+            const isCalm = Math.abs(smileDelta) < 0.012 && avgEAR >= 0.35 && avgEAR <= 0.495 && mar < 0.15;
+            if (isCalm) {
+                neutralFrameCount++;
+                if (neutralFrameCount >= NEUTRAL_DEBOUNCE) {
+                    detected = '平静';
+                } else {
+                    detected = lastExpression !== '校准中...' ? lastExpression : '平静';
+                }
+            } else {
+                neutralFrameCount = 0;
+            }
+        } else {
+            neutralFrameCount = 0;
+        }
+
+        if (!detected) detected = lastExpression !== '校准中...' ? lastExpression : '平静';
+        lastExpression = detected;
+        return detected;
+    }
+
+    function getExpressionDisplay(expr) {
+        const map = {
+            '高兴': { emoji: '😊', color: '#27ae60', meaning: '积极/肯定' },
+            '惊讶': { emoji: '😲', color: '#e67e22', meaning: '感叹/强调' },
+            '困惑': { emoji: '🤔', color: '#3498db', meaning: '疑问/请重复' },
+            '生气': { emoji: '😠', color: '#e74c3c', meaning: '不满/愤怒' },
+            '平静': { emoji: '😐', color: '#95a5a6', meaning: '默认状态' },
+            '校准中...': { emoji: '⏳', color: '#f39c12', meaning: '请保持自然表情' }
+        };
+        return map[expr] || { emoji: '', color: '#95a5a6', meaning: '' };
+    }
+
+    // ==========================================
+    // 特征提取、防抖与权重控制 (🌟 加入双手的相对位置特征)
+    // ==========================================
+    let previousFeatures = null;
+    const EMA_ALPHA = 0.5; 
+
+    function smoothFeatures(newFeatures) {
+        if (!previousFeatures || previousFeatures.length !== newFeatures.length) {
+            previousFeatures = [...newFeatures];
+            return newFeatures;
+        }
+        for (let i = 0; i < newFeatures.length; i++) {
+            if (newFeatures[i] === 0 || previousFeatures[i] === 0) {
+                previousFeatures[i] = newFeatures[i];
+            } else {
+                previousFeatures[i] = EMA_ALPHA * newFeatures[i] + (1 - EMA_ALPHA) * previousFeatures[i];
+            }
+        }
+        return [...previousFeatures];
+    }
+
+    function extractHandFeatures(landmarks) {
+        if (!landmarks) return new Array(63).fill(0); 
+        const wrist = landmarks[0];
+        let scale = dist(wrist, landmarks[9]); 
+        if (scale < 0.05) scale = 0.05; 
+        
+        const features = [];
+        for (let i = 0; i < 21; i++) {
+            let weight = 1.0;
+            if (i >= 1 && i <= 4) weight = 3.0; // 拇指权重
+            if (i >= 5 && i <= 8) weight = 2.0; // 食指权重
+
+            features.push(((landmarks[i].x - wrist.x) / scale) * weight);
+            features.push(((landmarks[i].y - wrist.y) / scale) * weight);
+            features.push(((landmarks[i].z - wrist.z) / scale) * weight);
+        }
+        return features; 
+    }
+
+    function extractBothHandsFeatures(results) {
+        const leftFeatures = extractHandFeatures(results.leftHandLandmarks);
+        const rightFeatures = extractHandFeatures(results.rightHandLandmarks);
+        
+        // 🌟 新增修复：加入双手相对位置，解决由于无空间概念导致双手动作不准的问题
+        let relativeFeatures = [0, 0, 0];
+        if (results.leftHandLandmarks && results.rightHandLandmarks) {
+            const lWrist = results.leftHandLandmarks[0];
+            const rWrist = results.rightHandLandmarks[0];
+            const scale = dist(lWrist, results.leftHandLandmarks[9]) || 0.1;
+            relativeFeatures = [
+                ((rWrist.x - lWrist.x) / scale) * 3.0,
+                ((rWrist.y - lWrist.y) / scale) * 3.0,
+                ((rWrist.z - lWrist.z) / scale) * 3.0
+            ];
+        }
+
+        return [...leftFeatures, ...rightFeatures, ...relativeFeatures]; 
+    }
+
+    // ==========================================
+    // 录入控制
+    // ==========================================
+    recordBtn.addEventListener('click', () => {
+        if (!isRecording) {
+            const name = gestureNameInput.value.trim();
+            if (!name) { alert("请先输入动作名称 (如: 新、年)！"); return; }
+            isRecording = true;
+            recordFramesCount = 0;
+            recordBtn.textContent = "录入中...请保持动作";
+            recordBtn.classList.add('recording');
+            recordProgress.style.display = 'block';
+            recordBar.style.width = '0%';
+        } else { stopRecording(); }
+    });
+
+    function stopRecording() {
+        isRecording = false;
+        recordBtn.textContent = "开始录入";
+        recordBtn.classList.remove('recording');
+        recordProgress.style.display = 'none';
+        recordBar.style.width = '0%';
+        outputText.innerText = `已录入动作: ${gestureNameInput.value.trim()}`;
+        debugText.innerText = `模型状态: 已加载 ${classifier.getNumClasses()} 种动作`;
+        
+        if (getGHConfig()) { uploadToGitHub(); }
+    }
+
+    // ==========================================
+    // Holistic 识别引擎
+    // ==========================================
+    async function onResults(results) {
+
+        // 🌟 新增修复：手腕和食指指尖同时重合时，判定为单手的双重幻觉，强制剔除假手
+        if (results.leftHandLandmarks && results.rightHandLandmarks) {
+            const wDist = dist(results.leftHandLandmarks[0], results.rightHandLandmarks[0]); 
+            const iDist = dist(results.leftHandLandmarks[8], results.rightHandLandmarks[8]); 
+            if (wDist < 0.08 && iDist < 0.08) {
+                results.rightHandLandmarks = null;
+            }
+        }
+
+        if (canvasElement.width !== results.image.width || canvasElement.height !== results.image.height) {
+            canvasElement.width = results.image.width;
+            canvasElement.height = results.image.height;
+        }
+
+        canvasCtx.save();
+        canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
+        canvasCtx.drawImage(results.image, 0, 0, canvasElement.width, canvasElement.height);
+
+        if (results.faceLandmarks) drawConnectors(canvasCtx, results.faceLandmarks, FACEMESH_TESSELATION, {color: '#C0C0C040', lineWidth: 1});
+        if (results.leftHandLandmarks) {
+            drawConnectors(canvasCtx, results.leftHandLandmarks, HAND_CONNECTIONS, {color: '#00FF00', lineWidth: 3});
+            drawLandmarks(canvasCtx, results.leftHandLandmarks, {color: '#FF0000', lineWidth: 1, radius: 2});
+        }
+        if (results.rightHandLandmarks) {
+            drawConnectors(canvasCtx, results.rightHandLandmarks, HAND_CONNECTIONS, {color: '#8ACBB7', lineWidth: 3});
+            drawLandmarks(canvasCtx, results.rightHandLandmarks, {color: '#FF6600', lineWidth: 1, radius: 2});
+        }
+        canvasCtx.restore();
+
+        if (results.faceLandmarks) {
+            const fl = results.faceLandmarks;
+            const expr = classifyExpression(fl);
+            const displayExpr = expr.includes('校准中') ? '校准中...' : expr;
+            const display = getExpressionDisplay(displayExpr);
+            
+            if (display.emoji) {
+                expressionText.innerHTML = `表情识别: ${display.emoji} <b>${expr}</b> <span style="font-size:14px;color:#7f8c8d;">(${display.meaning})</span>`;
+                expressionText.style.color = display.color;
+            } else {
+                expressionText.innerText = `表情识别: ${expr}`;
+                expressionText.style.color = '#95a5a6';
+            }
+        } else { expressionText.innerText = '未检测到面部'; expressionText.style.color = '#95a5a6'; }
+
+        const hasHand = results.leftHandLandmarks || results.rightHandLandmarks;
+
+        if (isRecording) {
+            if (hasHand) {
+                const rawFeatures = extractBothHandsFeatures(results);
+                const features = smoothFeatures(rawFeatures); 
+                const tensor = tf.tensor1d(features);
+                classifier.addExample(tensor, gestureNameInput.value.trim());
+                recordFramesCount++;
+                
+                const progress = Math.min(recordFramesCount / MAX_RECORD_FRAMES * 100, 100);
+                recordBar.style.width = progress + '%';
+                outputText.innerText = `正在抓取特征: ${gestureNameInput.value.trim()} (${recordFramesCount}/${MAX_RECORD_FRAMES})`;
+                
+                if (recordFramesCount >= MAX_RECORD_FRAMES) stopRecording();
+            } else { outputText.innerText = "录入暂停：请将手放入画面中心"; }
+        } 
+        else if (classifier.getNumClasses() > 0) {
+            if (hasHand) {
+                const rawFeatures = extractBothHandsFeatures(results);
+                const features = smoothFeatures(rawFeatures);
+                const tensor = tf.tensor1d(features);
+                try {
+                    const res = await classifier.predictClass(tensor, 5); 
+                    if (res.confidences[res.label] >= 0.8) {
+                        const detectedAction = res.label;
+                        
+                        if (detectedAction === currentConfirmed) {
+                            actionDebounceCount++;
+                        } else {
+                            currentConfirmed = detectedAction;
+                            actionDebounceCount = 1;
+                        }
+
+                        if (actionDebounceCount === 5) {
+                            if (actionSequence[actionSequence.length - 1] !== detectedAction) {
+                                actionSequence.push(detectedAction);
+                                lastActionTime = Date.now();
+                            }
+                        }
+                    }
+                } catch(e) {}
+                tensor.dispose(); 
+            } else {
+                previousFeatures = null; 
+            }
+
+            if (actionSequence.length > 0 && Date.now() - lastActionTime > 3000) {
+                actionSequence = [];
+                outputText.innerText = "系统就绪，等待输入...";
+                outputText.style.color = "#2c3e50";
+                currentConfirmed = "";
+            }
+
+            if (actionSequence.length > 0) {
+                const sequenceStr = actionSequence.join(",");
+                if (gestureDictionary[sequenceStr]) {
+                    outputText.innerText = gestureDictionary[sequenceStr];
+                    outputText.style.color = "#e74c3c"; 
+                } else {
+                    outputText.innerText = actionSequence.join(" ➜ ");
+                    outputText.style.color = "#8ACBB7"; 
+                }
+            } else if (!isRecording && !hasHand) {
+                outputText.innerText = "系统就绪，等待输入...";
+                outputText.style.color = "#2c3e50";
+            }
+        }
+    }
+
+    const holistic = new Holistic({locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/holistic/${file}`});
+    holistic.setOptions({
+        modelComplexity: 1,
+        smoothLandmarks: true,
+        minDetectionConfidence: 0.5,  // 🌟 新增修复：回调至0.5，防追踪丢失 (识别紧握的拳头)
+        minTrackingConfidence: 0.5,   
+        refineFaceLandmarks: true
+    });
+    holistic.onResults(onResults);
+
+    const camera = new Camera(videoElement, {
+        onFrame: async () => { await holistic.send({image: videoElement}); },
+        width: 1280, height: 720, facingMode: 'user'
+    });
+    camera.start()
+        .then(() => { 
+            outputText.innerText = "系统就绪，等待输入..."; 
+            debugText.innerText = classifier.getNumClasses() > 0 ? `模型状态: 已加载 ${classifier.getNumClasses()} 种动作` : "模型状态: 未录入任何手语";
+        })
+        .catch((err) => { outputText.innerText = "摄像头启动失败"; });
+
+    // ==========================================
+    // GitHub 云同步配置与逻辑
+    // ==========================================
+    const ghTokenInput = document.getElementById('gh-token');
+    const ghRepoInput = document.getElementById('gh-repo');
+    const ghStatus = document.getElementById('gh-status');
+    const MODEL_FILE = 'sign-language-model.json';
+
+    function loadGHConfig() {
+        const token = localStorage.getItem('gh_token');
+        const repo = localStorage.getItem('gh_repo');
+        if (token) ghTokenInput.value = token;
+        if (repo) ghRepoInput.value = repo;
+        if (token && repo) ghStatus.innerText = '已加载本地配置';
+    }
+    loadGHConfig();
+
+    document.getElementById('gh-save-btn').addEventListener('click', () => {
+        const token = ghTokenInput.value.trim();
+        const repo = ghRepoInput.value.trim();
+        if (!token || !repo) { alert('请填写完整配置！'); return; }
+        localStorage.setItem('gh_token', token);
+        localStorage.setItem('gh_repo', repo);
+        ghStatus.innerText = '配置已保存';
+        ghStatus.style.color = '#27ae60';
+    });
+
+    document.getElementById('gh-clear-btn').addEventListener('click', () => {
+        localStorage.removeItem('gh_token');
+        localStorage.removeItem('gh_repo');
+        ghTokenInput.value = '';
+        ghRepoInput.value = '';
+        ghStatus.innerText = '配置已清除';
+        ghStatus.style.color = '#e74c3c';
+    });
+
+    function getGHConfig() {
+        const token = localStorage.getItem('gh_token');
+        const repo = localStorage.getItem('gh_repo');
+        if (!token || !repo) return null;
+        return { token, repo };
+    }
+
+    async function getFileSHA(config) {
+        try {
+            const resp = await fetch(`https://api.github.com/repos/${config.repo}/contents/${MODEL_FILE}`, {
+                headers: { 'Authorization': `token ${config.token}` }
+            });
+            if (resp.ok) {
+                const data = await resp.json();
+                return data.sha;
+            }
+        } catch(e) {}
+        return null;
+    }
+
+    async function uploadToGitHub() {
+        const config = getGHConfig();
+        if (!config) { ghStatus.innerText = '请先保存 GitHub 配置'; ghStatus.style.color = '#e74c3c'; return; }
+        if (classifier.getNumClasses() === 0) return;
+
+        ghStatus.innerText = '正在同步到云端...';
+        ghStatus.style.color = '#f39c12';
+        try {
+            const content = btoa(unescape(encodeURIComponent(serializeModel())));
+            const sha = await getFileSHA(config);
+            const body = { message: '更新模型及句库', content: content };
+            if (sha) body.sha = sha;
+
+            const resp = await fetch(`https://api.github.com/repos/${config.repo}/contents/${MODEL_FILE}`, {
+                method: 'PUT',
+                headers: { 'Authorization': `token ${config.token}`, 'Content-Type': 'application/json' },
+                body: JSON.stringify(body)
+            });
+            if (resp.ok) {
+                ghStatus.innerText = '✅ 云端同步成功';
+                ghStatus.style.color = '#27ae60';
+            } else {
+                ghStatus.innerText = '同步失败 (验证Token/Repo)';
+                ghStatus.style.color = '#e74c3c';
+            }
+        } catch(e) {
+            ghStatus.innerText = '网络请求失败';
+            ghStatus.style.color = '#e74c3c';
+        }
+    }
+
+    async function pullFromGitHub() {
+        const config = getGHConfig();
+        if (!config) { ghStatus.innerText = '请先保存 GitHub 配置'; ghStatus.style.color = '#e74c3c'; return; }
+
+        ghStatus.innerText = '正在从云端拉取...';
+        ghStatus.style.color = '#f39c12';
+        try {
+            const resp = await fetch(`https://api.github.com/repos/${config.repo}/contents/${MODEL_FILE}`, {
+                headers: { 'Authorization': `token ${config.token}` }
+            });
+            if (resp.ok) {
+                const data = await resp.json();
+                const jsonStr = decodeURIComponent(escape(atob(data.content.replace(/\n/g, ''))));
+                loadModelFromJSON(jsonStr);
+                ghStatus.innerText = '✅ 已加载最新模型';
+                ghStatus.style.color = '#27ae60';
+            } else if (resp.status === 404) {
+                ghStatus.innerText = '云端尚未创建模型';
+                ghStatus.style.color = '#f39c12';
+            } else {
+                ghStatus.innerText = '拉取失败 (验证Token/Repo)';
+                ghStatus.style.color = '#e74c3c';
+            }
+        } catch(e) {
+            ghStatus.innerText = '拉取网络失败';
+            ghStatus.style.color = '#e74c3c';
+        }
+    }
+
+    function serializeModel() {
+        const dataset = classifier.getClassifierDataset();
+        const modelObj = {};
+        Object.keys(dataset).forEach(key => { modelObj[key] = dataset[key].arraySync(); });
+        
+        const exportData = {
+            modelData: modelObj,
+            customDict: customDictionary
+        };
+        return JSON.stringify(exportData);
+    }
+
+    function loadModelFromJSON(jsonStr) {
+        const parsed = JSON.parse(jsonStr);
+        let modelObj = parsed; 
+        
+        if (parsed.hasOwnProperty('modelData')) {
+            modelObj = parsed.modelData;
+            if (parsed.customDict) {
+                customDictionary = parsed.customDict;
+                gestureDictionary = { ...baseDictionary, ...customDictionary };
+                localStorage.setItem('custom_dict', JSON.stringify(customDictionary));
+                updateDictUI();
+            }
+        }
+        
+        const dataset = {};
+        Object.keys(modelObj).forEach(key => { dataset[key] = tf.tensor2d(modelObj[key]); });
+        classifier.setClassifierDataset(dataset);
+        debugText.innerText = `模型状态: 已加载 ${classifier.getNumClasses()} 种动作`;
+        outputText.innerText = "云端模型加载成功";
+    }
+
+    document.getElementById('sync-btn').addEventListener('click', uploadToGitHub);
+    document.getElementById('pull-btn').addEventListener('click', pullFromGitHub);
+    
+    document.getElementById('clear-btn').addEventListener('click', () => {
+        if(confirm('确定要清空本地学习的所有手势和自定义句库吗？')) {
+            classifier.clearAllClasses();
+            actionSequence = [];
+            customDictionary = {};
+            gestureDictionary = { ...baseDictionary };
+            localStorage.removeItem('custom_dict');
+            updateDictUI();
+            debugText.innerText = "模型状态: 本地模型已清空";
+            outputText.innerText = "系统就绪，等待输入...";
+        }
+    });
+
+    if (getGHConfig()) { pullFromGitHub(); }
+    </script>
+</body>
+</html>
