@@ -957,6 +957,9 @@
 // ==========================================
     // 突破 GitHub 1MB 限制的增强版拉取函数
     // ==========================================
+// ==========================================
+    // 突破大文件与 CORS 限制的终极拉取函数 (使用 Blob API)
+    // ==========================================
     async function pullFromGitHub() {
         const config = getGHConfig();
         if (!config) { ghStatus.innerText = '请先保存 GitHub 配置'; ghStatus.style.color = '#e74c3c'; return; }
@@ -964,6 +967,7 @@
         ghStatus.innerText = '正在从云端拉取...';
         ghStatus.style.color = '#f39c12';
         try {
+            // 1. 先获取文件的基础信息
             const resp = await fetch(`https://api.github.com/repos/${config.repo}/contents/${MODEL_FILE}`, {
                 headers: { 'Authorization': `token ${config.token}` }
             });
@@ -972,18 +976,21 @@
                 const data = await resp.json();
                 let jsonStr = '';
                 
-                // 🌟 核心修复：智能判断文件大小，突破 1MB 限制
+                // 🌟 终极修复：使用 Git Blob API 完美绕过跨域与大小限制
                 if (data.content && data.encoding === 'base64') {
-                    // 情况A：文件小于1MB，老规矩直接解码
+                    // 情况A：小文件 (< 1MB)，直接解析
                     jsonStr = decodeURIComponent(escape(atob(data.content.replace(/\n/g, ''))));
-                } else if (data.download_url) {
-                    // 情况B：文件大于1MB，通过 download_url 发起二次请求，直接拿最原始的文本！
-                    console.log("检测到超大模型文件，正在通过专线拉取原始内容...");
-                    const rawResp = await fetch(data.download_url, {
-                        headers: { 'Authorization': `token ${config.token}` } 
+                } else if (data.git_url) {
+                    // 情况B：大文件 (> 1MB)，走 GitHub 底层的 Blob API 专线
+                    console.log("检测到大文件，正在通过 Git Blob 专线安全拉取...");
+                    const blobResp = await fetch(data.git_url, {
+                        headers: { 'Authorization': `token ${config.token}` }
                     });
-                    if (!rawResp.ok) throw new Error("无法拉取大文件内容");
-                    jsonStr = await rawResp.text(); // 直接获取文本，省去了繁琐的解密步骤
+                    
+                    if (!blobResp.ok) throw new Error("Blob API 拉取被拒绝");
+                    
+                    const blobData = await blobResp.json();
+                    jsonStr = decodeURIComponent(escape(atob(blobData.content.replace(/\n/g, ''))));
                 } else {
                     throw new Error("无法解析的 GitHub 数据格式");
                 }
