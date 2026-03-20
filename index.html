@@ -550,35 +550,35 @@
             recordBar.style.width = '0%';
         } else { stopRecording(); }
     });
-    
+
     // ==========================================
     // 🗑️ 单独删除指定词汇功能
     // ==========================================
     document.getElementById('delete-word-btn').addEventListener('click', () => {
         const name = gestureNameInput.value.trim();
-        if (!name) { 
-            alert("请先在输入框填写你要删除的动作名称！"); 
-            return; 
+        if (!name) {
+            alert("请先在输入框填写你要删除的动作名称！");
+            return;
         }
-        
+
         try {
             // 获取当前模型里所有的标签
             const currentDataset = classifier.getClassifierDataset();
-            
+
             // 检查这个词存不存在
             if (currentDataset[name]) {
                 classifier.clearClass(name); // 瞬间抹除这个词的动作数据
-                
+
                 // 如果这个词有限定位置（空间锚点），一并删除
                 if (fixedAnchors[name]) {
                     delete fixedAnchors[name];
                 }
-                
+
                 // 更新右上角的模型数量显示
                 updateModelStatus();
                 outputText.innerText = `✅ 已成功删除: ${name}`;
                 outputText.style.color = "#e74c3c";
-                
+
                 // 3秒后恢复默认提示
                 setTimeout(() => {
                     if (!isRecording) {
@@ -586,7 +586,7 @@
                         outputText.style.color = "#2c3e50";
                     }
                 }, 3000);
-                
+
             } else {
                 alert(`⚠️ 模型中还没有录入 [${name}] 呢！`);
             }
@@ -954,6 +954,9 @@
         }
     }
 
+// ==========================================
+    // 突破 GitHub 1MB 限制的增强版拉取函数
+    // ==========================================
     async function pullFromGitHub() {
         const config = getGHConfig();
         if (!config) { ghStatus.innerText = '请先保存 GitHub 配置'; ghStatus.style.color = '#e74c3c'; return; }
@@ -964,12 +967,31 @@
             const resp = await fetch(`https://api.github.com/repos/${config.repo}/contents/${MODEL_FILE}`, {
                 headers: { 'Authorization': `token ${config.token}` }
             });
+            
             if (resp.ok) {
                 const data = await resp.json();
-                const jsonStr = decodeURIComponent(escape(atob(data.content.replace(/\n/g, ''))));
+                let jsonStr = '';
+                
+                // 🌟 核心修复：智能判断文件大小，突破 1MB 限制
+                if (data.content && data.encoding === 'base64') {
+                    // 情况A：文件小于1MB，老规矩直接解码
+                    jsonStr = decodeURIComponent(escape(atob(data.content.replace(/\n/g, ''))));
+                } else if (data.download_url) {
+                    // 情况B：文件大于1MB，通过 download_url 发起二次请求，直接拿最原始的文本！
+                    console.log("检测到超大模型文件，正在通过专线拉取原始内容...");
+                    const rawResp = await fetch(data.download_url, {
+                        headers: { 'Authorization': `token ${config.token}` } 
+                    });
+                    if (!rawResp.ok) throw new Error("无法拉取大文件内容");
+                    jsonStr = await rawResp.text(); // 直接获取文本，省去了繁琐的解密步骤
+                } else {
+                    throw new Error("无法解析的 GitHub 数据格式");
+                }
+                
                 loadModelFromJSON(jsonStr);
                 ghStatus.innerText = '✅ 已加载最新模型';
                 ghStatus.style.color = '#27ae60';
+                
             } else if (resp.status === 404) {
                 ghStatus.innerText = '云端尚未创建模型';
                 ghStatus.style.color = '#f39c12';
@@ -978,11 +1000,11 @@
                 ghStatus.style.color = '#e74c3c';
             }
         } catch(e) {
+            console.error("模型拉取具体报错:", e);
             ghStatus.innerText = '拉取网络失败';
             ghStatus.style.color = '#e74c3c';
         }
     }
-
     function serializeModel() {
         const ds = classifier.getClassifierDataset();
         const obj = {};
