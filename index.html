@@ -178,7 +178,10 @@
                             <input type="checkbox" id="is-fixed-pos"> 限定位置
                         </label>
                     </div>
-                    <button class="btn btn-primary" id="record-btn">开始录入</button>
+                    <div class="row-buttons" style="margin-bottom: 10px;">
+                        <button class="btn btn-primary" id="record-btn" style="flex:2;">开始录入</button>
+                        <button class="btn btn-outline" id="delete-word-btn" style="flex:1; color:#e74c3c; border-color:#e74c3c;" title="如果你录错了，点击这里删掉重录">🗑️ 删除该词</button>
+                    </div>
                     <div id="record-progress"><div id="record-bar"></div></div>
                 </div>
 
@@ -532,22 +535,49 @@
     // ==========================================
     // 录入控制
     // ==========================================
-    recordBtn.addEventListener('click', () => {
-        if (!isRecording) {
-            const name = gestureNameInput.value.trim();
-            if (!name) { alert("请先输入动作名称！"); return; }
-            isRecording = true;
-            recordFramesCount = 0;
-            wristHistory = [];
-            currentAnchorAccumulator = { lx: 0, ly: 0, rx: 0, ry: 0, countL: 0, countR: 0 };
-
-            recordBtn.textContent = "录入中...请保持动作";
-            recordBtn.classList.add('recording');
-            recordProgress.style.display = 'block';
-            recordBar.style.width = '0%';
-        } else { stopRecording(); }
+// ==========================================
+    // 🗑️ 单独删除指定词汇功能
+    // ==========================================
+    document.getElementById('delete-word-btn').addEventListener('click', () => {
+        const name = gestureNameInput.value.trim();
+        if (!name) { 
+            alert("请先在输入框填写你要删除的动作名称！"); 
+            return; 
+        }
+        
+        try {
+            // 获取当前模型里所有的标签
+            const currentDataset = classifier.getClassifierDataset();
+            
+            // 检查这个词存不存在
+            if (currentDataset[name]) {
+                classifier.clearClass(name); // 瞬间抹除这个词的动作数据
+                
+                // 如果这个词有限定位置（空间锚点），一并删除
+                if (fixedAnchors[name]) {
+                    delete fixedAnchors[name];
+                }
+                
+                // 更新右上角的模型数量显示
+                updateModelStatus();
+                outputText.innerText = `✅ 已成功删除: ${name}`;
+                outputText.style.color = "#e74c3c";
+                
+                // 3秒后恢复默认提示
+                setTimeout(() => {
+                    if (!isRecording) {
+                        outputText.innerText = "系统就绪，等待输入...";
+                        outputText.style.color = "#2c3e50";
+                    }
+                }, 3000);
+                
+            } else {
+                alert(`⚠️ 模型中还没有录入 [${name}] 呢！`);
+            }
+        } catch (e) {
+            console.error("删除异常:", e);
+        }
     });
-
     function stopRecording() {
         isRecording = false;
         recordBtn.textContent = "开始录入";
