@@ -535,7 +535,23 @@
     // ==========================================
     // 录入控制
     // ==========================================
-// ==========================================
+    recordBtn.addEventListener('click', () => {
+        if (!isRecording) {
+            const name = gestureNameInput.value.trim();
+            if (!name) { alert("请先输入动作名称！"); return; }
+            isRecording = true;
+            recordFramesCount = 0;
+            wristHistory = [];
+            currentAnchorAccumulator = { lx: 0, ly: 0, rx: 0, ry: 0, countL: 0, countR: 0 };
+
+            recordBtn.textContent = "录入中...请保持动作";
+            recordBtn.classList.add('recording');
+            recordProgress.style.display = 'block';
+            recordBar.style.width = '0%';
+        } else { stopRecording(); }
+    });
+    
+    // ==========================================
     // 🗑️ 单独删除指定词汇功能
     // ==========================================
     document.getElementById('delete-word-btn').addEventListener('click', () => {
@@ -578,6 +594,7 @@
             console.error("删除异常:", e);
         }
     });
+
     function stopRecording() {
         isRecording = false;
         recordBtn.textContent = "开始录入";
